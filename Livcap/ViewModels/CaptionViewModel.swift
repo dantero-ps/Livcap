@@ -12,11 +12,13 @@ import Combine
 import Speech
 import AVFoundation
 import Accelerate
+import Translation
 import os.log
 
 protocol CaptionViewModelProtocol: ObservableObject {
     var captionHistory: [CaptionEntry] { get }
     var currentTranscription: String { get }
+    var currentTranslation: String { get }
 }
 
 /// CaptionViewModel for real-time speech recognition using SFSpeechRecognizer
@@ -34,7 +36,11 @@ final class CaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     // Forwarded from SpeechProcessor
     var captionHistory: [CaptionEntry] { speechProcessor.captionHistory }
     var currentTranscription: String { speechProcessor.currentTranscription }
+    var currentTranslation: String { speechProcessor.currentTranslation }
     
+    // MARK: - Translation
+    let translationService = TranslationService()
+
     // MARK: - Private Properties
     private let audioCoordinator: AudioCoordinator
     private let speechProcessor: SpeechProcessor
@@ -51,7 +57,16 @@ final class CaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     init(audioCoordinator: AudioCoordinator = AudioCoordinator(), speechProcessor: SpeechProcessor = SpeechProcessor()) {
         self.audioCoordinator = audioCoordinator
         self.speechProcessor = speechProcessor
-        
+        speechProcessor.translationService = translationService
+
+        // When source language changes, update the speech recognizer locale
+        translationService.$sourceLanguage
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] language in
+                self?.speechProcessor.setRecognitionLocale(language)
+            }
+            .store(in: &cancellables)
+
         // Subscribe to audio coordinator changes and manage recording state
         audioCoordinator.objectWillChange
             .receive(on: DispatchQueue.main)

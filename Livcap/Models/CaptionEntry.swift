@@ -12,12 +12,14 @@ import Foundation
 struct CaptionEntry: Identifiable, Sendable {
     let id: UUID
     let text: String
-    let confidence: Float? // Optional confidence score
-    
-    init(id: UUID = UUID(), text: String, confidence: Float? = nil) {
+    let confidence: Float?
+    var translatedText: String?
+
+    init(id: UUID = UUID(), text: String, confidence: Float? = nil, translatedText: String? = nil) {
         self.id = id
         self.text = text
         self.confidence = confidence
+        self.translatedText = translatedText
     }
 }
 

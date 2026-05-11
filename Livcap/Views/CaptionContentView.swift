@@ -32,36 +32,58 @@ struct CaptionContentView<ViewModel: CaptionViewModelProtocol>: View {
                         let entry = captionViewModel.captionHistory[index]
                         let isFirstContent = index == 0 && captionViewModel.currentTranscription.isEmpty
                         
-                        Text(entry.text)
-                            .font(.system(size: 22, weight: .medium, design: .rounded))
-                            .foregroundColor(.primary)
-                            .lineSpacing(7)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.clear)
-                                    .opacity(opacityLevel)
-                            )
-                            .offset(y: isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOffset : 0)
-                            .opacity(isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOpacity : 1.0)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.text)
+                                .font(.system(size: 22, weight: .medium, design: .rounded))
+                                .foregroundColor(.primary)
+                                .lineSpacing(7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if let translated = entry.translatedText {
+                                Text(translated)
+                                    .font(.system(size: 17, weight: .regular, design: .rounded))
+                                    .foregroundColor(.secondary)
+                                    .lineSpacing(5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.clear)
+                                .opacity(opacityLevel)
+                        )
+                        .offset(y: isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOffset : 0)
+                        .opacity(isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOpacity : 1.0)
                     }
                     
                     // Current transcription (real-time at bottom)
                     if !captionViewModel.currentTranscription.isEmpty {
                         let isFirstContent = captionViewModel.captionHistory.isEmpty
-                        
-                        Text(captionViewModel.currentTranscription+"...")
-                            .font(.system(size: 22, weight: .medium, design: .rounded))
-                            .foregroundColor(.primary)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 1)
-                            .lineSpacing(7)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id("currentTranscription")
-                            .offset(y: isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOffset : 0)
-                            .opacity(isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOpacity : 1.0)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(captionViewModel.currentTranscription + "...")
+                                .font(.system(size: 22, weight: .medium, design: .rounded))
+                                .foregroundColor(.primary)
+                                .lineSpacing(7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if !captionViewModel.currentTranslation.isEmpty {
+                                Text(captionViewModel.currentTranslation)
+                                    .font(.system(size: 17, weight: .regular, design: .rounded))
+                                    .foregroundColor(.secondary)
+                                    .lineSpacing(5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .id("currentTranscription")
+                        .offset(y: isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOffset : 0)
+                        .opacity(isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOpacity : 1.0)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -163,8 +185,9 @@ class MockCaptionViewModel: ObservableObject, CaptionViewModelProtocol {
         CaptionEntry(text: "This app captures audio from your microphone and system audio sources.", confidence: 0.92),
         CaptionEntry(text: "Speech recognition is powered by Apple's advanced Speech framework.", confidence: 0.88)
     ]
-    
+
     @Published var currentTranscription: String = "This is a sample of real-time transcription text as it appears during live captioning"
+    @Published var currentTranslation: String = "Bu, canlı altyazı sırasında görünen gerçek zamanlı transkripsiyon metninin bir örneğidir"
 }
 
 

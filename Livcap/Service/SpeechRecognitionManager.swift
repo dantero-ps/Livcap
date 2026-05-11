@@ -9,6 +9,7 @@ import Foundation
 import Speech
 import AVFoundation
 import Combine
+import Translation
 import os.log
 
 // MARK: - Speech Events
@@ -28,12 +29,13 @@ final class SpeechRecognitionManager: ObservableObject {
     
     @Published private(set) var isRecording = false
     @Published var currentTranscription: String = ""
+    @Published var currentTranslation: String = ""
     @Published var captionHistory: [CaptionEntry] = []
     @Published var statusText: String = "Ready to record"
     
     // MARK: - Private Properties
     
-    private let speechRecognizer: SFSpeechRecognizer?
+    private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     
@@ -50,6 +52,10 @@ final class SpeechRecognitionManager: ObservableObject {
     private var speechEventsContinuation: AsyncStream<SpeechEvent>.Continuation?
     private var speechEventsStream: AsyncStream<SpeechEvent>?
     
+    // Translation
+    var translationService: TranslationService?
+    private var liveTranslationTask: Task<Void, Never>?
+
     // Logging
     private var isLoggerOn: Bool = false // change to true for debugging
     private let logger = Logger(subsystem: "com.livcap.speech", category: "SpeechRecognitionManager")
@@ -181,12 +187,16 @@ final class SpeechRecognitionManager: ObservableObject {
         
         Task { @MainActor in
             self.isRecording = false
-            
+            self.liveTranslationTask?.cancel()
+            self.currentTranslation = ""
+
             // Add final transcription to history if not empty
             if !self.currentTranscription.isEmpty {
-                self.addToHistory(self.currentTranscription)
-                self.speechEventsContinuation?.yield(.sentenceFinalized(self.currentTranscription))
+                let sentence = self.currentTranscription
                 self.currentTranscription = ""
+                self.speechEventsContinuation?.yield(.sentenceFinalized(sentence))
+                let translated = await self.translationService?.translate(sentence)
+                self.addToHistory(sentence, translatedText: translated)
             }
         }
         
@@ -257,17 +267,40 @@ final class SpeechRecognitionManager: ObservableObject {
         // Store the full transcription from SFSpeechRecognizer
         let previousFullLength = fullTranscriptionText.count
         fullTranscriptionText = transcription
-        
+
         // Extract only the NEW part that hasn't been processed yet
         let newPart = extractNewTranscriptionPart(from: transcription)
         currentTranscription = newPart
-        
+
         // Notify via AsyncStream
         speechEventsContinuation?.yield(.transcriptionUpdate(newPart))
-        
+
         // Reset silence counter if new text was added during silence
         if transcription.count > previousFullLength && !currentSpeechState {
             consecutiveSilenceFrames = 0
+        }
+
+        // Live translation with 500ms debounce
+        scheduleLiveTranslation(for: newPart)
+    }
+
+    @MainActor
+    private func scheduleLiveTranslation(for text: String) {
+        liveTranslationTask?.cancel()
+        guard translationService?.isEnabled == true else {
+            currentTranslation = ""
+            return
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            currentTranslation = ""
+            return
+        }
+        liveTranslationTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            guard !Task.isCancelled else { return }
+            if let translated = await self.translationService?.translate(text) {
+                await MainActor.run { self.currentTranslation = translated }
+            }
         }
     }
     
@@ -286,6 +319,11 @@ final class SpeechRecognitionManager: ObservableObject {
             guard let self = self else { return }
             Task {
                 if let error = error {
+                    let nsError = error as NSError
+                    // 203 = "No speech detected" — expected during session rotation, ignore
+                    if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 203 {
+                        return
+                    }
                     await self.updateStatus("Recognition error: \(error.localizedDescription)")
                     self.speechEventsContinuation?.yield(.error(error))
                     return
@@ -349,31 +387,36 @@ final class SpeechRecognitionManager: ObservableObject {
     @MainActor
     private func finalizeSentence() {
         if !currentTranscription.isEmpty {
-            logger.info("📝 FINALIZING SENTENCE: \(self.currentTranscription)")
-            
-            // Add the current sentence part to history
-            addToHistory(currentTranscription)
-            
-            // Notify via AsyncStream - this triggers UI to create new line!
-            speechEventsContinuation?.yield(.sentenceFinalized(currentTranscription))
-            
-            // Update processed length to include what we just added
+            let sentence = currentTranscription
+            logger.info("📝 FINALIZING SENTENCE: \(sentence)")
+
+            // Update processed length and clear before async translation
             processedTextLength = fullTranscriptionText.count
-            
-            // Clear current transcription for next sentence
             currentTranscription = ""
-            
+            liveTranslationTask?.cancel()
+            currentTranslation = ""
+
+            // Notify via AsyncStream
+            speechEventsContinuation?.yield(.sentenceFinalized(sentence))
+
+            // Add to history (with translation if enabled)
+            Task { @MainActor in
+                let translated = await self.translationService?.translate(sentence)
+                self.addToHistory(sentence, translatedText: translated)
+            }
+
             // Rotate session after a silence-based finalization to bound internal state
             rotateSession(reason: "silence-window", finalizeCurrent: false)
         }
     }
     
     @MainActor
-    private func addToHistory(_ text: String) {
+    private func addToHistory(_ text: String, translatedText: String? = nil) {
         let entry = CaptionEntry(
             id: UUID(),
             text: text,
-            confidence: 1.0 // SFSpeechRecognizer doesn't provide confidence scores
+            confidence: 1.0,
+            translatedText: translatedText
         )
         captionHistory.append(entry)
         
@@ -386,7 +429,36 @@ final class SpeechRecognitionManager: ObservableObject {
     }
     
     // MARK: - Public Utility Methods
-    
+
+    func setRecognitionLocale(_ language: Locale.Language?) {
+        let targetLocale: Locale
+        if let language {
+            let langCode = language.minimalIdentifier
+            // Find a supported locale whose language code matches
+            let matched = SFSpeechRecognizer.supportedLocales()
+                .first { $0.language.minimalIdentifier == langCode }
+            guard let matched else {
+                logger.warning("⚠️ No supported SFSpeechRecognizer locale for '\(langCode)'")
+                return
+            }
+            targetLocale = matched
+        } else {
+            targetLocale = Locale.current
+        }
+
+        let newRecognizer = SFSpeechRecognizer(locale: targetLocale)
+        guard newRecognizer?.isAvailable == true else {
+            logger.warning("⚠️ SFSpeechRecognizer not available for '\(targetLocale.identifier)'")
+            return
+        }
+        speechRecognizer = newRecognizer
+        logger.info("🌐 Recognition locale → \(targetLocale.identifier)")
+
+        if isRecording {
+            rotateSession(reason: "locale-change", finalizeCurrent: true)
+        }
+    }
+
     func clearCaptions() {
         Task { @MainActor in
             self.captionHistory.removeAll()

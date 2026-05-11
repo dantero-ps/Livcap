@@ -10,9 +10,19 @@ final class SpeechProcessor: ObservableObject {
     // Forwarded from SpeechRecognitionManager
     var captionHistory: [CaptionEntry] { speechRecognitionManager.captionHistory }
     var currentTranscription: String { speechRecognitionManager.currentTranscription }
+    var currentTranslation: String { speechRecognitionManager.currentTranslation }
     
     // MARK: - Private Properties
     private let speechRecognitionManager = SpeechRecognitionManager()
+
+    var translationService: TranslationService? {
+        get { speechRecognitionManager.translationService }
+        set { speechRecognitionManager.translationService = newValue }
+    }
+
+    func setRecognitionLocale(_ language: Locale.Language?) {
+        speechRecognitionManager.setRecognitionLocale(language)
+    }
     private var speechEventsTask: Task<Void, Never>?
     
     // Logging

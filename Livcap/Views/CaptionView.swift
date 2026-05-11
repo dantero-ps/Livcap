@@ -6,6 +6,7 @@
 //
 import SwiftUI
 import AppKit
+import Translation
 
 
 struct CaptionView: View {
@@ -14,7 +15,7 @@ struct CaptionView: View {
     @State private var isPinned = false
     @State private var isHovering = false
     @State private var showWindowControls = false
-    
+    @State private var showTranslationSettings = false
     // Animation state for first content appearance
     @State private var hasShownFirstContentAnimation = false
     @State private var firstContentAnimationOffset: CGFloat = 30
@@ -71,6 +72,11 @@ struct CaptionView: View {
             }
             if captionViewModel.isSystemAudioEnabled {
                 captionViewModel.toggleSystemAudio()
+            }
+        }
+        .translationTask(captionViewModel.translationService.configuration) { session in
+            await MainActor.run {
+                captionViewModel.translationService.setSession(session)
             }
         }
     }
@@ -163,7 +169,9 @@ struct CaptionView: View {
                 isActive: captionViewModel.isSystemAudioEnabled,
                 action: { captionViewModel.toggleSystemAudio() }
             )
-            
+
+            TranslationButton(translationService: captionViewModel.translationService, isPopoverOpen: $showTranslationSettings)
+
             CircularControlButton(
                 image: .system(isPinned ? "pin.fill" : "pin"),
                 helpText: "Pin Window",
@@ -174,7 +182,7 @@ struct CaptionView: View {
                 }
             )
         }
-        .opacity(isHovering ? 1.0 : 0.0)
+        .opacity(isHovering || showTranslationSettings ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.2), value: isHovering)
     }
 }
